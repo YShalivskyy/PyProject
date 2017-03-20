@@ -5,6 +5,9 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from com.website_parser.ApartmentParser import Parser
+from com.website_parser.OKTVApartmentParser import OKTVApartmentParser
+from com.website_parser.CustomExceptions import UrlListException
+from selenium.common.exceptions import NoSuchElementException
 
 PHANTOMJS_PATH = './phantomjs'
 
@@ -31,20 +34,24 @@ class WebSiteScraper:
         :returns list
             The list of urls of apartments.
         """
-        browser = webdriver.PhantomJS(PHANTOMJS_PATH)
-        browser.get("http://www.oktv.ua/search")
-        apartments_urls = []
+        try:
+            browser = webdriver.PhantomJS(PHANTOMJS_PATH)
+            browser.get("http://www.oktv.ua/search")
+            apartments_urls = []
 
-        city = browser.find_element_by_id("input-addr-text")
-        city.send_keys(city_name + Keys.RETURN)
-        page_content = BeautifulSoup(browser.page_source, "html.parser")
-        apartments = page_content.findAll(class_="col-lg-4 col-md-6 col-sm-6 col-xs-12 no-class")
+            city = browser.find_element_by_id("input-addr-text")
+            city.send_keys(city_name + Keys.RETURN)
 
-        for apartment in apartments:
-            apartments_urls.append("http://www.oktv.ua" + apartment.a["href"])
+            apartments = browser.find_elements_by_xpath("//div[@class='col-lg-4 col-md-6 col-sm-6 col-xs-12 no-class']")
 
-        browser.quit()
-        return apartments_urls
+            for apartment in apartments:
+                apartments_urls.append(apartment.find_element_by_css_selector('a').get_attribute('href'))
+
+            browser.quit()
+            return apartments_urls
+        except NoSuchElementException as e:
+            print("Error: ", e, self.__class__)
+
 
     def _scrap_dobovo_apartment_urls(self):
         """ Method to scrap urls of apartments from www.dobovo.com
@@ -77,23 +84,48 @@ class WebSiteScraper:
         browser.quit()
         return apartments_urls
 
+    def parse_oktvua_pages(self):
+        try:
+            oktvua_urls = self._scrap_oktvua_apartments_urls("Киев")
+            if not oktvua_urls:
+                raise UrlListException("Expression: parse_otkvua_pages(self)", "The url list is empty", self.__class__)
+
+            parser = OKTVApartmentParser()
+
+            print("Scraping data from www.oktv.ua")
+            for url in oktvua_urls:
+                self._scraped_data["oktvua"][url] = parser.parse_apartment_data(url, 2)
+
+        except UrlListException as e:
+            print(e.print_traceback())
+        except Exception as e:
+            print("Undefined exception: ", e, self.__class__)
+
+    def parse_dobovo_pages(self):
+        try:
+            dobovo_urls = self._scrap_dobovo_apartment_urls()
+            if not dobovo_urls:
+                raise UrlListException("Expression: parse_dobovo_pages(self)", "The url list is empty", self.__class__)
+
+
+            # print("Scraping data from www.dobovo.com")
+            # for url in dobovo_urls:
+            #     self._scraped_data["dobovo"][url] = parser.parse_dobovo_apartment_data(url, 2)
+        except UrlListException as e:
+            print(e.print_traceback())
+        except Exception as e:
+            print("Undefined exception: ", e, self.__class__)
+
+
     def parse_apartments_pages(self):
         """ Method which which creates lists of urls of apartments from websites.
         Calls methods to parse data from urls in the loop.
         Collecting all the information in the self._scraped_data object
         """
-        oktvua_urls = self._scrap_oktvua_apartments_urls("Киев")
-        dobovo_urls = self._scrap_dobovo_apartment_urls()
+        pass
 
-        parser = Parser()
 
-        print("Scraping data from www.oktv.ua")
-        for url in oktvua_urls:
-            self._scraped_data["oktvua"][url] = parser.parse_oktvua_apartment_data(url, 2)
 
-        print("Scraping data from www.dobovo.com")
-        for url in dobovo_urls:
-            self._scraped_data["dobovo"][url] = parser.parse_dobovo_apartment_data(url, 2)
 
     def print_parsed_data(self):
         pprint.pprint(self._scraped_data)
@@ -101,7 +133,8 @@ class WebSiteScraper:
 
 def main():
     s = WebSiteScraper()
-    s.parse_apartments_pages()
+    # s.parse_apartments_pages()
+    s.parse_oktvua_pages()
     s.print_parsed_data()
 
 if __name__ == "__main__":
